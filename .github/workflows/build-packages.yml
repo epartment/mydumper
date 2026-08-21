@@ -1,0 +1,505 @@
+name: Build Packages
+
+# Runs on version tags (e.g. v0.16.3-1) or manually via the Actions UI.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+-[0-9]+'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 0.16.3) – only used when triggered manually'
+        required: false
+        default: '0.16.3'
+      revision:
+        description: 'Revision (e.g. 1) – only used when triggered manually'
+        required: false
+        default: '1'
+
+defaults:
+  run:
+    shell: bash
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 1 – Build man pages AND the jammy/mysql80/amd64 package.
+#           All other build jobs download the man pages produced here.
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  build-man:
+    name: jammy / mysql80 / amd64  (+ man pages)
+    runs-on: ubuntu-22.04
+    container:
+      image: mydumper/mydumper-builder-jammy
+      options: --user root   # override the circleci user in cimg/base images
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true   # needed for docs/
+
+      - name: Set version variables
+        run: |
+          TAG="${GITHUB_REF_NAME:-v${{ inputs.version }}-${{ inputs.revision }}}"
+          VERSION="${TAG:1}"                        # strip leading 'v'
+          echo "MYDUMPER_VERSION=${VERSION%-*}"  >> "$GITHUB_ENV"
+          echo "MYDUMPER_REVISION=${VERSION##*-}" >> "$GITHUB_ENV"
+
+      - name: Set up source symlink expected by package/build.sh
+        run: |
+          mkdir -p /tmp/src /tmp/man /tmp/package
+          ln -sfn "$GITHUB_WORKSPACE" /tmp/src/mydumper
+
+      - name: Install MySQL 8.0 dev libraries
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          echo "mysql-apt-config mysql-apt-config/select-product string Ok"       | debconf-set-selections
+          echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.0-lts" | debconf-set-selections
+          rm -f /usr/share/keyrings/mysql-apt-config.gpg
+          echo "4" | dpkg-reconfigure mysql-apt-config
+          apt-get update
+          apt-get install -y gdb screen time libmysqlclient21 libmysqlclient-dev mysql-client fakeroot
+
+      - name: Compile (statically linked against libmysqlclient.a)
+        run: |
+          source /etc/profile.d/sh.local 2>/dev/null || true
+          cmake . -DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libmysqlclient.a
+          make VERBOSE=1
+          ctest --output-on-failure
+          make install
+          ./mydumper --version
+          if (( $(nm ./mydumper | grep -i mysql | grep " T " | wc -l) < 40 )); then
+            echo "Static-linking check failed"; exit 1
+          fi
+
+      - name: Build man pages
+        run: |
+          apt-get install -y pip sphinx-common
+          pip install furo sphinx_copybutton sphinx-inline-tabs
+          cd docs
+          cmake . -DWITH_HTML=OFF
+          make
+          gzip man/mydumper.1 man/myloader.1
+          cp man/mydumper.1.gz man/myloader.1.gz /tmp/man/
+
+      - name: Package jammy_mysql80_amd64
+        run: |
+          mkdir -p /tmp/src/mydumper/jammy_mysql80_amd64/etc
+          cp /tmp/man/mydumper.1.gz /tmp/man/myloader.1.gz \
+             mydumper.cnf mydumper myloader \
+             /tmp/src/mydumper/jammy_mysql80_amd64/
+          ./package/build.sh "$MYDUMPER_VERSION" "$MYDUMPER_REVISION" \
+            deb jammy_mysql80_amd64 amd64
+
+      - name: Upload man pages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: man-pages
+          path: /tmp/man/
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-jammy_mysql80_amd64
+          path: /tmp/package/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 2 – Build all other packages in parallel.
+# ─────────────────────────────────────────────────────────────────────────────
+  build:
+    name: ${{ matrix.name }}
+    needs: build-man
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: mydumper/mydumper-builder-${{ matrix.os }}
+      options: --user root
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Ubuntu / Debian (deb) ──────────────────────────────────────────
+          - name: bionic_percona80_amd64
+            os: bionic
+            vendor: percona80
+            runner: ubuntu-latest
+            pkg: deb
+            arch: amd64
+            arch_lib: x86_64-linux-gnu
+            cmake_lib: perconaserverclient
+            static_lib: perconaserverclient
+
+          - name: focal_mysql80_amd64
+            os: focal
+            vendor: mysql80
+            runner: ubuntu-latest
+            pkg: deb
+            arch: amd64
+            arch_lib: x86_64-linux-gnu
+            cmake_lib: mysqlclient
+            static_lib: mysqlclient
+
+          - name: focal_mariadb1011_arm64
+            os: focal
+            vendor: mariadb1011
+            runner: ubuntu-24.04-arm
+            pkg: deb
+            arch: arm64
+            arch_lib: aarch64-linux-gnu
+            cmake_lib: mariadb
+            static_lib: mariadbclient
+
+          - name: jammy_mariadb1011_arm64
+            os: jammy
+            vendor: mariadb1011
+            runner: ubuntu-24.04-arm
+            pkg: deb
+            arch: arm64
+            arch_lib: aarch64-linux-gnu
+            cmake_lib: mariadb
+            static_lib: mariadbclient
+
+          - name: noble_mysql84_amd64
+            os: noble
+            vendor: mysql84
+            runner: ubuntu-latest
+            pkg: deb
+            arch: amd64
+            arch_lib: x86_64-linux-gnu
+            cmake_lib: mysqlclient
+            static_lib: mysqlclient
+
+          - name: noble_ubuntu_default_arm64
+            os: noble
+            vendor: ubuntu_default
+            runner: ubuntu-24.04-arm
+            pkg: deb
+            arch: arm64
+            arch_lib: aarch64-linux-gnu
+            cmake_lib: mysqlclient
+            static_lib: mysqlclient
+
+          - name: resolute_mysql84_amd64
+            os: resolute
+            vendor: mysql84
+            runner: ubuntu-latest
+            pkg: deb
+            arch: amd64
+            arch_lib: x86_64-linux-gnu
+            cmake_lib: mysqlclient
+            static_lib: mysqlclient
+
+          - name: resolute_mysql84_arm64
+            os: resolute
+            vendor: mysql84
+            runner: ubuntu-24.04-arm
+            pkg: deb
+            arch: arm64
+            arch_lib: aarch64-linux-gnu
+            cmake_lib: mysqlclient
+            static_lib: mysqlclient
+
+          - name: bullseye_percona57_amd64
+            os: bullseye
+            vendor: percona57
+            runner: ubuntu-latest
+            pkg: deb
+            arch: amd64
+            arch_lib: x86_64-linux-gnu
+            cmake_lib: perconaserverclient
+            static_lib: perconaserverclient
+
+          - name: bookworm_mysql84_amd64
+            os: bookworm
+            vendor: mysql84
+            runner: ubuntu-latest
+            pkg: deb
+            arch: amd64
+            arch_lib: x86_64-linux-gnu
+            cmake_lib: mysqlclient
+            static_lib: mysqlclient
+
+          - name: bookworm_mariadb1011_arm64
+            os: bookworm
+            vendor: mariadb1011
+            runner: ubuntu-24.04-arm
+            pkg: deb
+            arch: arm64
+            arch_lib: aarch64-linux-gnu
+            cmake_lib: mariadb
+            static_lib: mariadbclient
+
+          - name: trixie_mysql84_amd64
+            os: trixie
+            vendor: mysql84
+            runner: ubuntu-latest
+            pkg: deb
+            arch: amd64
+            arch_lib: x86_64-linux-gnu
+            cmake_lib: mysqlclient
+            static_lib: mysqlclient
+
+          - name: trixie_debian_default_arm64
+            os: trixie
+            vendor: debian_default
+            runner: ubuntu-24.04-arm
+            pkg: deb
+            arch: arm64
+            arch_lib: aarch64-linux-gnu
+            cmake_lib: mariadb
+            static_lib: mariadbclient
+
+          # ── RPM / EL ───────────────────────────────────────────────────────
+          - name: el7_percona57_x86_64
+            os: el7
+            vendor: percona57
+            runner: ubuntu-latest
+            pkg: rpm
+            arch: x86_64
+
+          - name: el8_mysql84_x86_64
+            os: el8
+            vendor: mysql84
+            runner: ubuntu-latest
+            pkg: rpm
+            arch: x86_64
+
+          - name: el8_mysql84_aarch64
+            os: el8
+            vendor: mysql84
+            runner: ubuntu-24.04-arm
+            pkg: rpm
+            arch: aarch64
+
+          - name: el9_mysql84_x86_64
+            os: el9
+            vendor: mysql84
+            runner: ubuntu-latest
+            pkg: rpm
+            arch: x86_64
+
+          - name: el9_mysql84_aarch64
+            os: el9
+            vendor: mysql84
+            runner: ubuntu-24.04-arm
+            pkg: rpm
+            arch: aarch64
+
+          - name: el10_mysql84_x86_64
+            os: el10
+            vendor: mysql84
+            runner: ubuntu-latest
+            pkg: rpm
+            arch: x86_64
+
+          - name: el10_mysql84_aarch64
+            os: el10
+            vendor: mysql84
+            runner: ubuntu-24.04-arm
+            pkg: rpm
+            arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up source symlink expected by package/build.sh
+        run: |
+          mkdir -p /tmp/src /tmp/package
+          ln -sfn "$GITHUB_WORKSPACE" /tmp/src/mydumper
+
+      - name: Download man pages
+        uses: actions/download-artifact@v4
+        with:
+          name: man-pages
+          path: /tmp/man/
+
+      - name: Set version variables
+        run: |
+          TAG="${GITHUB_REF_NAME:-v${{ inputs.version }}-${{ inputs.revision }}}"
+          VERSION="${TAG:1}"
+          echo "MYDUMPER_VERSION=${VERSION%-*}"  >> "$GITHUB_ENV"
+          echo "MYDUMPER_REVISION=${VERSION##*-}" >> "$GITHUB_ENV"
+
+      # ── Dependency installation ────────────────────────────────────────────
+      - name: Install deps — mariadb1011
+        if: matrix.vendor == 'mariadb1011'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          bash /tmp/mariadb_repo_setup --skip-maxscale --mariadb-server-version "mariadb-10.11"
+          apt-get install -y gdb screen time mariadb-client libmariadbclient18 \
+            libmariadb-dev libmariadb-dev-compat fakeroot || true
+          apt-get install -y gdb screen time mariadb-client libmariadbclient18 \
+            libmariadb-dev libmariadb-dev-compat fakeroot
+
+      - name: Install deps — mysql80
+        if: matrix.vendor == 'mysql80'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          echo "mysql-apt-config mysql-apt-config/select-product string Ok"           | debconf-set-selections
+          echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.0-lts" | debconf-set-selections
+          rm -f /usr/share/keyrings/mysql-apt-config.gpg
+          echo "4" | dpkg-reconfigure mysql-apt-config
+          apt-get update
+          apt-get install -y gdb screen time libmysqlclient21 libmysqlclient-dev mysql-client fakeroot
+
+      - name: Install deps — mysql84 (deb)
+        if: matrix.vendor == 'mysql84' && matrix.pkg == 'deb'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          echo "mysql-apt-config mysql-apt-config/select-product string Ok"           | debconf-set-selections
+          echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.4-lts" | debconf-set-selections
+          rm -f /usr/share/keyrings/mysql-apt-config.gpg
+          echo "3" | dpkg-reconfigure mysql-apt-config
+          apt-get update
+          apt-get install -y gdb screen time libmysqlclient24 libmysqlclient-dev mysql-client fakeroot
+
+      - name: Install deps — percona57 (deb)
+        if: matrix.vendor == 'percona57' && matrix.pkg == 'deb'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          percona-release setup -y ps57
+          apt-get install -y gdb screen time \
+            libperconaserverclient20 percona-server-client-5.7 \
+            libperconaserverclient20-dev fakeroot
+
+      - name: Install deps — percona80 (deb)
+        if: matrix.vendor == 'percona80' && matrix.pkg == 'deb'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          echo 'REPOSITORIES="tools"' > /etc/default/percona-release
+          percona-release setup -y ps80
+          apt-get install -y gdb screen time \
+            libperconaserverclient21 libperconaserverclient21-dev \
+            percona-server-client fakeroot
+
+      - name: Install deps — ubuntu_default / debian_default (deb)
+        if: (matrix.vendor == 'ubuntu_default' || matrix.vendor == 'debian_default') && matrix.pkg == 'deb'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y default-mysql-client default-libmysqlclient-dev \
+            default-mysql-client-core fakeroot
+
+      - name: Install deps — el7 / percona57 (rpm)
+        if: matrix.os == 'el7' && matrix.pkg == 'rpm'
+        run: |
+          percona-release setup -y ps57
+          dnf -y module disable mysql || true
+          yum -y install libasan gdb screen time \
+            Percona-Server-devel-57 Percona-Server-client-57 rpmdevtools
+
+      - name: Install deps — el8 / mysql84 (rpm)
+        if: matrix.os == 'el8' && matrix.pkg == 'rpm'
+        run: |
+          dnf module disable mysql -y
+          yum install -y libasan gdb screen time \
+            mysql-community-libs mysql-community-devel mysql-community-client rpmdevtools
+
+      - name: Install deps — el9 / el10 / mysql84 (rpm)
+        if: (matrix.os == 'el9' || matrix.os == 'el10') && matrix.pkg == 'rpm'
+        run: |
+          yum install -y libasan gdb screen time \
+            mysql-community-libs mysql-community-devel mysql-community-client rpmdevtools
+
+      # ── Compile ─────────────────────────────────────────────────────────────
+      - name: Compile (deb — static link against vendor .a)
+        if: matrix.pkg == 'deb'
+        run: |
+          source /etc/profile.d/sh.local 2>/dev/null || true
+          cmake . "-DMYSQL_LIBRARIES_${{ matrix.cmake_lib }}:FILEPATH=/usr/lib/${{ matrix.arch_lib }}/lib${{ matrix.static_lib }}.a"
+          make VERBOSE=1
+          ctest --output-on-failure
+          make install
+          ./mydumper --version
+          if (( $(nm ./mydumper | grep -i mysql | grep " T " | wc -l) < 40 )); then
+            echo "Static-linking check failed"; exit 1
+          fi
+
+      - name: Compile (rpm — static link against /usr/lib64/mysql/libmysqlclient.a)
+        if: matrix.pkg == 'rpm'
+        run: |
+          source /etc/profile.d/sh.local 2>/dev/null || true
+          cmake . -DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a
+          make VERBOSE=1
+          ctest --output-on-failure
+          make install
+          ./mydumper --version
+          if (( $(nm ./mydumper | grep -i mysql | grep " T " | wc -l) < 40 )); then
+            echo "Static-linking check failed"; exit 1
+          fi
+
+      # ── Package ─────────────────────────────────────────────────────────────
+      - name: Package (deb)
+        if: matrix.pkg == 'deb'
+        run: |
+          mkdir -p /tmp/src/mydumper/${{ matrix.name }}/etc
+          cp /tmp/man/mydumper.1.gz /tmp/man/myloader.1.gz \
+             mydumper.cnf mydumper myloader \
+             /tmp/src/mydumper/${{ matrix.name }}/
+          ./package/build.sh "$MYDUMPER_VERSION" "$MYDUMPER_REVISION" \
+            deb ${{ matrix.name }} ${{ matrix.arch }}
+
+      - name: Package (rpm)
+        if: matrix.pkg == 'rpm'
+        run: |
+          mkdir -p /tmp/src/mydumper/${{ matrix.name }}
+          cp /tmp/man/mydumper.1.gz /tmp/man/myloader.1.gz \
+             mydumper.cnf mydumper myloader \
+             /tmp/src/mydumper/${{ matrix.name }}/
+          ./package/build.sh "$MYDUMPER_VERSION" "$MYDUMPER_REVISION" \
+            rpm ${{ matrix.name }} ${{ matrix.arch }}
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.name }}
+          path: /tmp/package/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 3 – Create a draft GitHub release with all packages + checksums.
+#           Only runs when triggered by a version tag.
+# ─────────────────────────────────────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: [build-man, build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          merge-multiple: true
+          path: /tmp/packages/
+
+      - name: Generate checksum file
+        run: |
+          cd /tmp/packages
+          {
+            echo -e "MD5s:\n\`\`\`"
+            md5sum *.deb *.rpm 2>/dev/null
+            echo -e "\`\`\`\nSHA256s:\n\`\`\`"
+            sha256sum *.deb *.rpm 2>/dev/null
+            echo '```'
+          } > body.md
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: true
+          body_path: /tmp/packages/body.md
+          files: |
+            /tmp/packages/*.deb
+            /tmp/packages/*.rpm
