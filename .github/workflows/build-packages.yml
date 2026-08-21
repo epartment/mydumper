@@ -143,26 +143,6 @@ jobs:
             cmake_lib: mysqlclient
             static_lib: mysqlclient
 
-          - name: focal_mariadb1011_arm64
-            os: focal
-            vendor: mariadb1011
-            runner: ubuntu-24.04-arm
-            pkg: deb
-            arch: arm64
-            arch_lib: aarch64-linux-gnu
-            cmake_lib: mariadb
-            static_lib: mariadbclient
-
-          - name: jammy_mariadb1011_arm64
-            os: jammy
-            vendor: mariadb1011
-            runner: ubuntu-24.04-arm
-            pkg: deb
-            arch: arm64
-            arch_lib: aarch64-linux-gnu
-            cmake_lib: mariadb
-            static_lib: mariadbclient
-
           - name: noble_mysql84_amd64
             os: noble
             vendor: mysql84
@@ -173,16 +153,6 @@ jobs:
             cmake_lib: mysqlclient
             static_lib: mysqlclient
 
-          - name: noble_ubuntu_default_arm64
-            os: noble
-            vendor: ubuntu_default
-            runner: ubuntu-24.04-arm
-            pkg: deb
-            arch: arm64
-            arch_lib: aarch64-linux-gnu
-            cmake_lib: mysqlclient
-            static_lib: mysqlclient
-
           - name: resolute_mysql84_amd64
             os: resolute
             vendor: mysql84
@@ -190,16 +160,6 @@ jobs:
             pkg: deb
             arch: amd64
             arch_lib: x86_64-linux-gnu
-            cmake_lib: mysqlclient
-            static_lib: mysqlclient
-
-          - name: resolute_mysql84_arm64
-            os: resolute
-            vendor: mysql84
-            runner: ubuntu-24.04-arm
-            pkg: deb
-            arch: arm64
-            arch_lib: aarch64-linux-gnu
             cmake_lib: mysqlclient
             static_lib: mysqlclient
 
@@ -223,16 +183,6 @@ jobs:
             cmake_lib: mysqlclient
             static_lib: mysqlclient
 
-          - name: bookworm_mariadb1011_arm64
-            os: bookworm
-            vendor: mariadb1011
-            runner: ubuntu-24.04-arm
-            pkg: deb
-            arch: arm64
-            arch_lib: aarch64-linux-gnu
-            cmake_lib: mariadb
-            static_lib: mariadbclient
-
           - name: trixie_mysql84_amd64
             os: trixie
             vendor: mysql84
@@ -242,16 +192,6 @@ jobs:
             arch_lib: x86_64-linux-gnu
             cmake_lib: mysqlclient
             static_lib: mysqlclient
-
-          - name: trixie_debian_default_arm64
-            os: trixie
-            vendor: debian_default
-            runner: ubuntu-24.04-arm
-            pkg: deb
-            arch: arm64
-            arch_lib: aarch64-linux-gnu
-            cmake_lib: mariadb
-            static_lib: mariadbclient
 
           # ── RPM / EL ───────────────────────────────────────────────────────
           - name: el7_percona57_x86_64
