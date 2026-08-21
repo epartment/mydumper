@@ -39,7 +39,12 @@ jobs:
 
       - name: Set version variables
         run: |
-          TAG="${GITHUB_REF_NAME:-v${{ inputs.version }}-${{ inputs.revision }}}"
+          # Use the tag name when triggered by a tag push; fall back to manual inputs otherwise.
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="v${{ inputs.version }}-${{ inputs.revision }}"
+          fi
           VERSION="${TAG:1}"                        # strip leading 'v'
           echo "MYDUMPER_VERSION=${VERSION%-*}"  >> "$GITHUB_ENV"
           echo "MYDUMPER_REVISION=${VERSION##*-}" >> "$GITHUB_ENV"
@@ -314,7 +319,11 @@ jobs:
 
       - name: Set version variables
         run: |
-          TAG="${GITHUB_REF_NAME:-v${{ inputs.version }}-${{ inputs.revision }}}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="v${{ inputs.version }}-${{ inputs.revision }}"
+          fi
           VERSION="${TAG:1}"
           echo "MYDUMPER_VERSION=${VERSION%-*}"  >> "$GITHUB_ENV"
           echo "MYDUMPER_REVISION=${VERSION##*-}" >> "$GITHUB_ENV"
