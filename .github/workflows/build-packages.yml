@@ -336,7 +336,7 @@ jobs:
           rm -f /usr/share/keyrings/mysql-apt-config.gpg
           echo "3" | dpkg-reconfigure mysql-apt-config
           apt-get update
-          apt-get install -y gdb screen time libmysqlclient24 libmysqlclient-dev mysql-client fakeroot
+          apt-get install -y gdb screen time libmysqlclient21 libmysqlclient-dev mysql-client fakeroot
 
       - name: Install deps — percona57 (deb)
         if: matrix.vendor == 'percona57' && matrix.pkg == 'deb'
