@@ -326,8 +326,8 @@ jobs:
           apt-get update
           apt-get install -y gdb screen time libmysqlclient21 libmysqlclient-dev mysql-client fakeroot
 
-      - name: Install deps — mysql84 (deb)
-        if: matrix.vendor == 'mysql84' && matrix.pkg == 'deb'
+      - name: Install deps — mysql84 (deb, noble arm64)
+        if: matrix.vendor == 'mysql84' && matrix.pkg == 'deb' && matrix.os == 'noble' && matrix.arch == 'arm64'
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -337,6 +337,18 @@ jobs:
           echo "3" | dpkg-reconfigure mysql-apt-config
           apt-get update
           apt-get install -y gdb screen time libmysqlclient21 libmysqlclient-dev mysql-client fakeroot
+
+      - name: Install deps — mysql84 (deb, all other targets)
+        if: matrix.vendor == 'mysql84' && matrix.pkg == 'deb' && !(matrix.os == 'noble' && matrix.arch == 'arm64')
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          echo "mysql-apt-config mysql-apt-config/select-product string Ok"           | debconf-set-selections
+          echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.4-lts" | debconf-set-selections
+          rm -f /usr/share/keyrings/mysql-apt-config.gpg
+          echo "3" | dpkg-reconfigure mysql-apt-config
+          apt-get update
+          apt-get install -y gdb screen time libmysqlclient24 libmysqlclient-dev mysql-client fakeroot
 
       - name: Install deps — percona57 (deb)
         if: matrix.vendor == 'percona57' && matrix.pkg == 'deb'
