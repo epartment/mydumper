@@ -51,13 +51,9 @@ jobs:
 
       - name: Check out upstream source tag
         run: |
-          UPSTREAM_SHA="$(git ls-remote --tags --refs https://github.com/mydumper/mydumper.git "v${MYDUMPER_VERSION}" | awk '{print $1}')"
-          if [[ -z "$UPSTREAM_SHA" ]]; then
-            echo "Upstream tag v${MYDUMPER_VERSION} not found in mydumper/mydumper"
-            exit 1
-          fi
-          git fetch --depth 1 https://github.com/mydumper/mydumper.git "$UPSTREAM_SHA"
-          git checkout --detach FETCH_HEAD
+          git fetch --depth 1 https://github.com/mydumper/mydumper.git \
+            "refs/tags/v${MYDUMPER_VERSION}:refs/tags/upstream/v${MYDUMPER_VERSION}"
+          git checkout --detach "refs/tags/upstream/v${MYDUMPER_VERSION}"
 
       - name: Set up source symlink expected by package/build.sh
         run: |
@@ -313,13 +309,9 @@ jobs:
 
       - name: Check out upstream source tag
         run: |
-          UPSTREAM_SHA="$(git ls-remote --tags --refs https://github.com/mydumper/mydumper.git "v${MYDUMPER_VERSION}" | awk '{print $1}')"
-          if [[ -z "$UPSTREAM_SHA" ]]; then
-            echo "Upstream tag v${MYDUMPER_VERSION} not found in mydumper/mydumper"
-            exit 1
-          fi
-          git fetch --depth 1 https://github.com/mydumper/mydumper.git "$UPSTREAM_SHA"
-          git checkout --detach FETCH_HEAD
+          git fetch --depth 1 https://github.com/mydumper/mydumper.git \
+            "refs/tags/v${MYDUMPER_VERSION}:refs/tags/upstream/v${MYDUMPER_VERSION}"
+          git checkout --detach "refs/tags/upstream/v${MYDUMPER_VERSION}"
 
       # ── Dependency installation ────────────────────────────────────────────
       - name: Install deps — mariadb1011
