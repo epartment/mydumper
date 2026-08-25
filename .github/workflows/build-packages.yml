@@ -37,6 +37,9 @@ jobs:
         with:
           submodules: true   # needed for docs/
 
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Set version variables
         run: |
           # Use the tag name when triggered by a tag push; fall back to manual inputs otherwise.
@@ -284,6 +287,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up source symlink expected by package/build.sh
         run: |
