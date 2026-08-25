@@ -51,9 +51,9 @@ jobs:
 
       - name: Check out upstream source tag
         run: |
-          git remote add upstream https://github.com/mydumper/mydumper.git
-          git fetch --depth 1 upstream "refs/tags/v${MYDUMPER_VERSION}:refs/tags/v${MYDUMPER_VERSION}"
-          git checkout "v${MYDUMPER_VERSION}"
+          git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/mydumper/mydumper.git
+          git fetch --depth 1 upstream "refs/tags/v${MYDUMPER_VERSION}"
+          git checkout --detach FETCH_HEAD
           git submodule update --init --recursive
 
       - name: Set up source symlink expected by package/build.sh
@@ -310,9 +310,9 @@ jobs:
 
       - name: Check out upstream source tag
         run: |
-          git remote add upstream https://github.com/mydumper/mydumper.git
-          git fetch --depth 1 upstream "refs/tags/v${MYDUMPER_VERSION}:refs/tags/v${MYDUMPER_VERSION}"
-          git checkout "v${MYDUMPER_VERSION}"
+          git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/mydumper/mydumper.git
+          git fetch --depth 1 upstream "refs/tags/v${MYDUMPER_VERSION}"
+          git checkout --detach FETCH_HEAD
           git submodule update --init --recursive
 
       # ── Dependency installation ────────────────────────────────────────────
